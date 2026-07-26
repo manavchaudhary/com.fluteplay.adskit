@@ -1,0 +1,40 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f7b6748c2937b4851aa96a470ec4f6dd, type: 3}
+  m_Name: AdsSettings_Default
+  m_EditorClassIdentifier: 
+  adsEnabled: 1
+  testMode: 0
+  logLevel: info
+  timeoutMs: 1500
+  bannerEnabled: 1
+  interstitialEnabled: 1
+  interstitialCooldownSeconds: 45
+  interstitialMaxPerSession: 20
+  rewardedEnabled: 1
+  placements:
+  - key: HomeBanner
+    format: 0
+    enabled: 1
+    cooldownSeconds: 0
+  - key: LobbyAd
+    format: 0
+    enabled: 1
+    cooldownSeconds: 0
+  - key: GameOverInterstitial
+    format: 1
+    enabled: 1
+    cooldownSeconds: 0
+  - key: ShopReward
+    format: 2
+    enabled: 1
+    cooldownSeconds: 0

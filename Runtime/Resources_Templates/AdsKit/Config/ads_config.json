@@ -1,0 +1,45 @@
+{
+    "global": {
+        "adsEnabled": true,
+        "testMode": false,
+        "logLevel": "info",
+        "timeoutMs": 1500
+    },
+    "providers": [
+        { "name": "ADMOB", "enabled": true, "priority": 0 },
+        { "name": "MOCK", "enabled": true, "priority": 1 },
+        { "name": "MAX", "enabled": true, "priority": 2 }
+    ],
+    "formats": {
+        "banner": { "enabled": true },
+        "interstitial": {
+            "enabled": true,
+            "cooldownSeconds": 45,
+            "maxPerSession": 20
+        },
+        "rewarded": { "enabled": true }
+    },
+    "placements": [
+        {
+            "key": "HomeBanner",
+            "format": "banner",
+            "enabled": true
+        },
+        {
+            "key": "LobbyAd",
+            "format": "banner",
+            "enabled": true
+        },
+        {
+            "key": "GameOverInterstitial",
+            "format": "interstitial",
+            "enabled": true,
+            "cooldownSeconds": 60
+        },
+        {
+            "key": "ShopReward",
+            "format": "rewarded",
+            "enabled": true
+        }
+    ]
+}

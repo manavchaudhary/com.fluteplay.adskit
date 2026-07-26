@@ -1,0 +1,14 @@
+{
+  "name": "Fluteplay.AdsKit",
+  "rootNamespace": "FluteplayGames.AdsKit",
+  "references": [],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

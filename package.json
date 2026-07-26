@@ -1,0 +1,17 @@
+{
+    "name": "com.fluteplay.adskit",
+    "version": "1.2.0",
+    "displayName": "Fluteplay AdsKit",
+    "description": "Reusable Unity ads framework with placement-wise AdMob unit IDs and multi-placement loading.",
+    "unity": "6000.0",
+    "author": {
+        "name": "Fluteplay Games"
+    },
+    "samples": [
+        {
+            "displayName": "Ads Testing",
+            "description": "Sample scene and scripts for testing AdsKit.",
+            "path": "Samples~/AdsTesting"
+        }
+    ]
+}

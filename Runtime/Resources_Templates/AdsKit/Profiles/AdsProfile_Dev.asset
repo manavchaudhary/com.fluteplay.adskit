@@ -1,0 +1,28 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fb52598a6b0d54b33bb2f3a3094f1810, type: 3}
+  m_Name: AdsProfile_Dev
+  m_EditorClassIdentifier: 
+  companyName: FluteplayGames
+  gameName: MyGame
+  bundleId: com.gameworld.fungames
+  maxSdkKey: 
+  maxBannerUnitId: 
+  maxInterstitialUnitId: 
+  maxRewardedUnitId: 
+  admobAndroidAppId: ca-app-pub-8704072853357072~6918741768
+  admobIosAppId: ca-app-pub-3940256099942544~1458002511
+  admobBannerUnitId: ca-app-pub-8704072853357072/4884439511
+  admobInterstitialUnitId: ca-app-pub-8704072853357072/5124112661
+  admobRewardedUnitId: ca-app-pub-8704072853357072/1288809433
+  enableLogging: 1
+  forceTestMode: 0
