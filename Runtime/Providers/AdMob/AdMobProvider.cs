@@ -27,6 +27,18 @@ namespace FluteplayGames.AdsKit
         private readonly Dictionary<string, AdsResult> _interstitialLoadErrors = new();
         private readonly Dictionary<string, bool> _rewardEarnedThisShow = new();
 
+        // Rewarded load state / recovery
+        private readonly Dictionary<string, bool> _rewardedLoading = new();
+        private readonly Dictionary<string, int> _rewardedRetryAttempt = new();
+        private readonly Dictionary<string, bool> _rewardedRetryScheduled = new();
+        private readonly Dictionary<string, DateTime> _rewardedLoadedAtUtc = new();
+        private readonly Dictionary<string, bool> _rewardedShowCompleted = new();
+
+        private const int MaxRewardedRetryAttempts = 5;
+        private const float RewardedRetryBaseSeconds = 2f;
+        private const float RewardedRetryMaxSeconds = 60f;
+        private static readonly TimeSpan RewardedAdMaxAge = TimeSpan.FromMinutes(55);
+
 
 
         public void Initialize(AdsSettingsAsset settings, AdsProfile profile)
@@ -47,6 +59,9 @@ namespace FluteplayGames.AdsKit
             }
 
             Debug.Log("[AdsKit][AdMob] Initializing MobileAds...");
+
+            // Keep Google Mobile Ads callbacks on Unity's main thread.
+            MobileAds.RaiseAdEventsOnUnityMainThread = true;
 
             MobileAds.Initialize(initStatus =>
             {
@@ -71,11 +86,17 @@ namespace FluteplayGames.AdsKit
                            && interstitialReady;
 
                 case AdFormat.Rewarded:
-                    return _rewardedAds.TryGetValue(placementKey, out var rewardedAd)
-                           && rewardedAd != null
-                           && rewardedAd.CanShowAd()
-                           && _rewardedReady.TryGetValue(placementKey, out var rewardedReady)
-                           && rewardedReady;
+                    if (!IsRewardedUsable(placementKey))
+                    {
+                        if (_rewardedAds.ContainsKey(placementKey) && IsRewardedExpired(placementKey))
+                        {
+                            Debug.LogWarning($"[AdsKit][AdMob] Rewarded cache expired: placement={placementKey}. Reloading.");
+                            CleanupRewardedAd(placementKey);
+                            LoadRewarded(placementKey);
+                        }
+                        return false;
+                    }
+                    return true;
 
                 default:
                     return false;
@@ -264,6 +285,7 @@ public AdsResult ShowRewarded(string placementKey, Action<AdsResult> onCompleted
 
     _pendingRewardedCompleted[placementKey] = onCompleted;
     _rewardEarnedThisShow[placementKey] = false;
+    _rewardedShowCompleted[placementKey] = false;
     _rewardedReady[placementKey] = false;
 
     try
@@ -450,38 +472,58 @@ public AdsResult ShowRewarded(string placementKey, Action<AdsResult> onCompleted
                 return;
             }
 
-            _rewardedReady[placementKey] = false;
-
-            if (_rewardedAds.TryGetValue(placementKey, out var oldAd))
+            if (_rewardedLoading.TryGetValue(placementKey, out bool isLoading) && isLoading)
             {
-                oldAd?.Destroy();
-                _rewardedAds.Remove(placementKey);
+                Debug.Log($"[AdsKit][AdMob] Rewarded load skipped (already loading): placement={placementKey}");
+                return;
             }
+
+            if (IsRewardedUsable(placementKey))
+            {
+                Debug.Log($"[AdsKit][AdMob] Rewarded load skipped (already ready): placement={placementKey}");
+                return;
+            }
+
+            _rewardedLoading[placementKey] = true;
+            _rewardedReady[placementKey] = false;
+            CleanupRewardedAd(placementKey);
 
             Debug.Log($"[AdsKit][AdMob] Loading rewarded: placement={placementKey}");
 
             RewardedAd.Load(unitId, new AdRequest(), (ad, error) =>
             {
+                _rewardedLoading[placementKey] = false;
+
                 if (error != null || ad == null)
                 {
+                    string providerError = BuildLoadErrorDetails(error, "RewardedAd.Load returned null ad");
+
                     AdsResult loadError = AdsResult.Fail(
                         placementKey,
                         AdFormat.Rewarded,
                         AdsErrorCodes.AdLoadFailed,
                         Name,
-                        error != null ? error.ToString() : "RewardedAd.Load returned null ad"
+                        providerError
                     );
 
                     _rewardedLoadErrors[placementKey] = loadError;
+                    _rewardedReady[placementKey] = false;
 
-                    Debug.LogWarning($"[AdsKit][AdMob] Rewarded load failed: {loadError}");
+                    Debug.LogWarning(
+                        $"[AdsKit][AdMob][Rewarded][LoadFailed] placement={placementKey} {providerError}"
+                    );
+
+                    ScheduleRewardedRetry(placementKey);
                     return;
                 }
 
                 _rewardedLoadErrors.Remove(placementKey);
+                _rewardedRetryAttempt[placementKey] = 0;
+                _rewardedRetryScheduled[placementKey] = false;
 
                 _rewardedAds[placementKey] = ad;
                 _rewardedReady[placementKey] = true;
+                _rewardedLoadedAtUtc[placementKey] = DateTime.UtcNow;
 
                 ad.OnAdPaid += adValue =>
                 {
@@ -513,41 +555,181 @@ public AdsResult ShowRewarded(string placementKey, Action<AdsResult> onCompleted
                         ? AdsResult.Ok(placementKey, AdFormat.Rewarded, Name)
                         : AdsResult.Fail(placementKey, AdFormat.Rewarded, AdsErrorCodes.RewardNotEarned, Name);
 
-                    CompleteRewarded(placementKey, result);
-
+                    CompleteRewardedOnce(placementKey, result);
                     _rewardEarnedThisShow[placementKey] = false;
 
-                    ad.Destroy();
-                    _rewardedAds.Remove(placementKey);
-
+                    CleanupRewardedAd(placementKey, ad);
                     LoadRewarded(placementKey);
                 };
 
                 ad.OnAdFullScreenContentFailed += adError =>
                 {
-                    Debug.LogWarning($"[AdsKit][AdMob] Rewarded failed to open: placement={placementKey} error={adError}");
+                    string providerError = BuildAdErrorDetails(adError);
 
-                    CompleteRewarded(
+                    Debug.LogWarning(
+                        $"[AdsKit][AdMob][Rewarded][ShowFailed] placement={placementKey} {providerError}"
+                    );
+
+                    CompleteRewardedOnce(
                         placementKey,
                         AdsResult.Fail(
                             placementKey,
                             AdFormat.Rewarded,
                             AdsErrorCodes.AdFailedToShow,
                             Name,
-                            adError.ToString()
+                            providerError
                         )
                     );
 
                     _rewardEarnedThisShow[placementKey] = false;
 
-                    ad.Destroy();
-                    _rewardedAds.Remove(placementKey);
-
+                    CleanupRewardedAd(placementKey, ad);
                     LoadRewarded(placementKey);
                 };
 
                 Debug.Log($"[AdsKit][AdMob] Rewarded loaded: placement={placementKey}");
             });
+        }
+
+        private void ScheduleRewardedRetry(string placementKey)
+        {
+            if (_rewardedRetryScheduled.TryGetValue(placementKey, out bool scheduled) && scheduled)
+                return;
+
+            int attempt = _rewardedRetryAttempt.TryGetValue(placementKey, out int currentAttempt)
+                ? currentAttempt + 1
+                : 1;
+
+            _rewardedRetryAttempt[placementKey] = attempt;
+
+            if (attempt > MaxRewardedRetryAttempts)
+            {
+                Debug.LogWarning(
+                    $"[AdsKit][AdMob] Rewarded automatic retry limit reached: placement={placementKey}. " +
+                    "The opportunity stays available; the next manual request can load again."
+                );
+                return;
+            }
+
+            float delaySeconds = Mathf.Min(
+                RewardedRetryBaseSeconds * Mathf.Pow(2f, attempt - 1),
+                RewardedRetryMaxSeconds
+            );
+
+            _rewardedRetryScheduled[placementKey] = true;
+
+            Debug.Log(
+                $"[AdsKit][AdMob] Rewarded retry scheduled: placement={placementKey} " +
+                $"attempt={attempt}/{MaxRewardedRetryAttempts} delay={delaySeconds:0}s"
+            );
+
+            if (AdsService.Instance != null)
+            {
+                AdsService.Instance.StartCoroutine(RetryRewardedAfterDelay(placementKey, delaySeconds));
+            }
+            else
+            {
+                _rewardedRetryScheduled[placementKey] = false;
+            }
+        }
+
+        private System.Collections.IEnumerator RetryRewardedAfterDelay(string placementKey, float delaySeconds)
+        {
+            yield return new WaitForSecondsRealtime(delaySeconds);
+
+            _rewardedRetryScheduled[placementKey] = false;
+
+            if (!IsInitialized || IsRewardedUsable(placementKey))
+                yield break;
+
+            LoadRewarded(placementKey);
+        }
+
+        private bool IsRewardedUsable(string placementKey)
+        {
+            if (!_rewardedAds.TryGetValue(placementKey, out var ad) || ad == null)
+                return false;
+
+            if (!_rewardedReady.TryGetValue(placementKey, out bool ready) || !ready)
+                return false;
+
+            if (IsRewardedExpired(placementKey))
+                return false;
+
+            return ad.CanShowAd();
+        }
+
+        private bool IsRewardedExpired(string placementKey)
+        {
+            return _rewardedLoadedAtUtc.TryGetValue(placementKey, out DateTime loadedAt) &&
+                   DateTime.UtcNow - loadedAt >= RewardedAdMaxAge;
+        }
+
+        private void CleanupRewardedAd(string placementKey, RewardedAd specificAd = null)
+        {
+            if (specificAd != null)
+            {
+                try
+                {
+                    specificAd.Destroy();
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[AdsKit][AdMob] Rewarded destroy warning: placement={placementKey} error={ex.Message}");
+                }
+            }
+
+            if (_rewardedAds.TryGetValue(placementKey, out var currentAd) &&
+                (specificAd == null || ReferenceEquals(currentAd, specificAd)))
+            {
+                if (specificAd == null)
+                {
+                    try
+                    {
+                        currentAd?.Destroy();
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"[AdsKit][AdMob] Rewarded destroy warning: placement={placementKey} error={ex.Message}");
+                    }
+                }
+
+                _rewardedAds.Remove(placementKey);
+            }
+
+            _rewardedReady[placementKey] = false;
+            _rewardedLoadedAtUtc.Remove(placementKey);
+        }
+
+        private void CompleteRewardedOnce(string placementKey, AdsResult result)
+        {
+            if (_rewardedShowCompleted.TryGetValue(placementKey, out bool completed) && completed)
+            {
+                Debug.LogWarning($"[AdsKit][AdMob] Duplicate rewarded completion ignored: placement={placementKey}");
+                return;
+            }
+
+            _rewardedShowCompleted[placementKey] = true;
+            CompleteRewarded(placementKey, result);
+        }
+
+        private static string BuildLoadErrorDetails(LoadAdError error, string fallback)
+        {
+            if (error == null)
+                return fallback;
+
+            string cause = error.GetCause() != null ? error.GetCause().ToString() : "none";
+            string responseInfo = error.GetResponseInfo() != null ? error.GetResponseInfo().ToString() : "none";
+
+            return $"Code={error.GetCode()} | Domain={error.GetDomain()} | Message={error.GetMessage()} | Cause={cause} | ResponseInfo={responseInfo}";
+        }
+
+        private static string BuildAdErrorDetails(AdError error)
+        {
+            if (error == null)
+                return "AdError=null";
+
+            return $"Code={error.GetCode()} | Domain={error.GetDomain()} | Message={error.GetMessage()}";
         }
 
        private void CompleteInterstitial(string placementKey, AdsResult result)
