@@ -26,7 +26,7 @@ com.fluteplay.adskit
 Current version:
 
 ```json
-1.1.0
+1.3.0
 ```
 
 ---
